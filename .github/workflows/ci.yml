@@ -87,13 +87,11 @@ jobs:
             --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Push Helm chart to Docker Hub (OCI)
-        env:
-          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euxo pipefail
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          DEST="oci://registry-1.docker.io/${DH_USER}"
-          echo "Helm push destination: ${DEST}"
+          DEST="oci://$REGISTRY/${{ secrets.DOCKERHUB_USERNAME }}"
+          echo "Helm push destination: $DEST"
           helm push "$HELM_TGZ" "$DEST"
 
       - name: Install ORAS
