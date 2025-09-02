@@ -2,7 +2,7 @@ name: zabbix-k8s-ci
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
   workflow_dispatch:
 
@@ -20,12 +20,11 @@ jobs:
         with:
           cluster_name: zbx
 
-      - name: Install kubectl & helm (preinstalled on runner, but ensure versions)
+      - name: Show tool versions
         run: |
           kubectl version --client
           helm version
 
-      # ---------- Deploy ----------
       - name: Apply manifests
         run: |
           kubectl apply -f manifests/00-namespace.yaml
@@ -41,18 +40,16 @@ jobs:
           kubectl -n zabbix wait --for=condition=available deploy/zabbix-web --timeout=600s
           kubectl -n zabbix get pods -o wide
 
-      # ---------- Smoke test (HTTP 200 and "Zabbix" in HTML) ----------
       - name: HTTP check from inside cluster
         run: |
           kubectl -n zabbix run curl --image=curlimages/curl:8.9.1 --restart=Never --rm -i -- \
             sh -c 'curl -s -o - http://zabbix-web.zabbix.svc.cluster.local/ | tee /dev/stderr | grep -qi "Zabbix"'
 
-      # ---------- Package artifacts ----------
       - name: Create tar.gz bundle
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
-      - name: Upload test artifacts (optional)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: zabbix-k8s-bundle
@@ -98,7 +95,7 @@ jobs:
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
-      - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
+      - name: Push tar.gz as OCI artifact
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
             -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
