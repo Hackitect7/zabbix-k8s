@@ -62,63 +62,51 @@ jobs:
     name: Publish to Docker Hub (OCI)
     needs: [test-deploy]
     runs-on: ubuntu-latest
-    # <<< избежать запуска без секретов на PR из форков >>>
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
     env:
       REGISTRY: registry-1.docker.io
+      REPO_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
 
     steps:
       - name: Checkout
-      # v4 ок
         uses: actions/checkout@v4
 
       - name: Read chart version
         id: chartver
         run: |
-          set -euo pipefail
           VER=$(grep '^version:' helm/zabbix-mini-chart/Chart.yaml | awk '{print $2}')
-          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}" >> $GITHUB_OUTPUT
 
       - name: Package Helm chart
         run: |
-          set -euxo pipefail
           helm package helm/zabbix-mini-chart
           ls -l *.tgz
 
-      - name: Sanity check secrets
-        run: |
-          set -euo pipefail
-          test -n "${{ secrets.DOCKERHUB_USERNAME }}" || { echo "ERROR: DOCKERHUB_USERNAME is empty"; exit 1; }
-          test -n "${{ secrets.DOCKERHUB_TOKEN }}"    || { echo "ERROR: DOCKERHUB_TOKEN is empty"; exit 1; }
-
       - name: Login to Docker Hub (OCI)
         run: |
-          set -euo pipefail
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login registry-1.docker.io \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
             --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Push Helm chart to Docker Hub (OCI)
         env:
-          OCI_DEST: oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euxo pipefail
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          helm push "$HELM_TGZ" "$OCI_DEST"
+          DEST="oci://registry-1.docker.io/${DH_USER}"
+          echo "Helm push destination: ${DEST}"
+          helm push "$HELM_TGZ" "$DEST"
 
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
 
       - name: Create tar.gz bundle
         run: |
-          set -euxo pipefail
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
       - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
         run: |
-          set -euo pipefail
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login registry-1.docker.io \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
             -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          oras push registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
+          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
             --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
