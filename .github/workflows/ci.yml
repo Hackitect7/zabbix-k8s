@@ -90,10 +90,11 @@ jobs:
         run: |
           set -euxo pipefail
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          DEST="oci://$REGISTRY/${{ secrets.DOCKERHUB_USERNAME }}"
+          # ВПИШИ СВОЙ ЛОГИН НИЖЕ (нижний регистр)
+          DEST="oci://registry-1.docker.io/hackitect7"
           echo "Helm push destination: $DEST"
-          helm push "$HELM_TGZ" "$DEST"
-
+          helm push "$HELM_TGZ" "$DEST
+          
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
 
