@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zabbix-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: zabbix-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zabbix-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zabbix-server
+    spec:
+      containers:
+        - name: zabbix-server
+          image: {{ .Values.image.server | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_SERVER_HOST
+              value: zabbix-postgres
+            - name: DB_SERVER_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: POSTGRES_DB
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 10051
+              name: zbx-trapper
+          readinessProbe:
+            tcpSocket:
+              port: 10051
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 10051
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.resources.server.requests.cpu | quote }}
+              memory: {{ .Values.resources.server.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.resources.server.limits.cpu | quote }}
+              memory: {{ .Values.resources.server.limits.memory | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: zabbix-server
+spec:
+  type: ClusterIP
+  ports:
+    - name: trapper
+      port: 10051
+      targetPort: 10051
+  selector:
+    app.kubernetes.io/name: zabbix-server

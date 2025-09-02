@@ -1,0 +1,13 @@
+1) Install chart:
+   helm install zabbix ./zabbix-mini-chart --namespace {{ .Values.namespace }} --create-namespace
+
+2) Access UI:
+   - DNS/hosts -> {{ .Values.web.host }}
+   - Or port-forward: kubectl -n {{ .Values.namespace }} port-forward svc/zabbix-web 8080:80
+     Then open http://localhost:8080
+
+3) Default login: Admin / zabbix (change after first login).
+
+4) If DB init fails:
+   - Ensure zabbix-server and zabbix-web can reach 'zabbix-postgres:5432'
+   - Check env vars DB_* in pods, see logs: kubectl -n {{ .Values.namespace }} logs deploy/zabbix-server

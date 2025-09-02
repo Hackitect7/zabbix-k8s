@@ -1,0 +1,27 @@
+namespace: zabbix
+
+image:
+  postgres: "postgres:16-alpine"
+  server: "zabbix/zabbix-server-pgsql:alpine-latest"
+  web: "zabbix/zabbix-web-nginx-pgsql:alpine-latest"
+
+db:
+  name: "zabbix"
+  user: "zabbix"
+  password: "zabbixStrongP@ssw0rd"
+  storage: "10Gi"
+
+web:
+  host: "zabbix.local"
+  timezone: "Asia/Bishkek"
+
+resources:
+  postgres:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1",    memory: "2Gi" }
+  server:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1",    memory: "2Gi" }
+  web:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1",    memory: "1Gi" }

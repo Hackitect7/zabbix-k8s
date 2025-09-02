@@ -1,0 +1,107 @@
+name: zabbix-k8s-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-deploy:
+    name: Kind deploy & smoke-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: zbx
+
+      - name: Install kubectl & helm (preinstalled on runner, but ensure versions)
+        run: |
+          kubectl version --client
+          helm version
+
+      # ---------- Deploy ----------
+      - name: Apply manifests
+        run: |
+          kubectl apply -f manifests/00-namespace.yaml
+          kubectl apply -f manifests/10-secret-db.yaml
+          kubectl apply -f manifests/20-postgres-sts.yaml
+          kubectl apply -f manifests/30-zabbix-server-deploy.yaml
+          kubectl apply -f manifests/40-zabbix-web-deploy.yaml
+          kubectl apply -f manifests/50-ingress.yaml
+
+      - name: Wait for readiness
+        run: |
+          kubectl -n zabbix wait --for=condition=available deploy/zabbix-server --timeout=600s
+          kubectl -n zabbix wait --for=condition=available deploy/zabbix-web --timeout=600s
+          kubectl -n zabbix get pods -o wide
+
+      # ---------- Smoke test (HTTP 200 and "Zabbix" in HTML) ----------
+      - name: HTTP check from inside cluster
+        run: |
+          kubectl -n zabbix run curl --image=curlimages/curl:8.9.1 --restart=Never --rm -i -- \
+            sh -c 'curl -s -o - http://zabbix-web.zabbix.svc.cluster.local/ | tee /dev/stderr | grep -qi "Zabbix"'
+
+      # ---------- Package artifacts ----------
+      - name: Create tar.gz bundle
+        run: |
+          tar -czf zabbix-k8s-bundle.tar.gz manifests helm
+
+      - name: Upload test artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zabbix-k8s-bundle
+          path: zabbix-k8s-bundle.tar.gz
+
+  publish:
+    name: Publish to Docker Hub (OCI)
+    needs: [test-deploy]
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: registry-1.docker.io
+      REPO_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read chart version
+        id: chartver
+        run: |
+          VER=$(grep '^version:' helm/zabbix-mini-chart/Chart.yaml | awk '{print $2}')
+          echo "ver=${VER}" >> $GITHUB_OUTPUT
+
+      - name: Package Helm chart
+        run: |
+          helm package helm/zabbix-mini-chart
+          ls -l *.tgz
+
+      - name: Login to Docker Hub (OCI)
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
+            --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Push Helm chart to Docker Hub (OCI)
+        run: |
+          HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
+          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Create tar.gz bundle
+        run: |
+          tar -czf zabbix-k8s-bundle.tar.gz manifests helm
+
+      - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
+            -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
+            ./zabbix-k8s-bundle.tar.gz:application/gzip \
+            --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
