@@ -80,13 +80,14 @@ jobs:
 
       - name: Login to Docker Hub (OCI)
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login registry-1.docker.io \
             --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
+          # ВАЖНО: указываем namespace (твой логин) — helm сам создаст repo <ns>/zabbix-mini-chart
+          helm push "$HELM_TGZ" oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
 
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
@@ -97,8 +98,8 @@ jobs:
 
       - name: Push tar.gz as OCI artifact
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login registry-1.docker.io \
             -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
+          oras push registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
             --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
