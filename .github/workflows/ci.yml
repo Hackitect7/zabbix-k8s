@@ -67,19 +67,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Явно валидируем, что секреты заданы
-      - name: Validate secrets
-        run: |
-          test -n "${{ secrets.DOCKERHUB_USERNAME }}" || (echo "Missing secret DOCKERHUB_USERNAME" && exit 1)
-          test -n "${{ secrets.DOCKERHUB_TOKEN }}" || (echo "Missing secret DOCKERHUB_TOKEN" && exit 1)
-
-      # Нормализуем namespace в lower-case (на всякий случай)
-      - name: Normalize namespace
-        id: ns
-        run: |
-          NS="$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')"
-          echo "ns=${NS}" >> "$GITHUB_OUTPUT"
-
       - name: Read chart version
         id: chartver
         run: |
@@ -99,7 +86,7 @@ jobs:
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          helm push "$HELM_TGZ" oci://$REGISTRY/${{ steps.ns.outputs.ns }}
+          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
 
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
@@ -111,7 +98,7 @@ jobs:
       - name: Push tar.gz as OCI artifact
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
-            -u "${{ steps.ns.outputs.ns }}" --password-stdin
-          oras push $REGISTRY/${{ steps.ns.outputs.ns }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
+            -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
             --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
