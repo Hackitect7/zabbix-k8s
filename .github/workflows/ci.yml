@@ -61,11 +61,30 @@ jobs:
     runs-on: ubuntu-latest
     env:
       REGISTRY: registry-1.docker.io
-      REPO_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 1) Вычисляем namespace: секрет → иначе владелец репо; to lower-case
+      - name: Resolve namespace
+        id: ns
+        run: |
+          NS="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -z "$NS" ]; then
+            NS="${{ github.repository_owner }}"
+            echo "Warn: DOCKERHUB_USERNAME not set; using repo owner"
+          fi
+          NS=$(echo "$NS" | tr '[:upper:]' '[:lower:]')
+          echo "ns=${NS}" >> "$GITHUB_OUTPUT"
+
+      # 2) Защитная проверка: не пускать push без namespace
+      - name: Validate namespace
+        run: |
+          if [ -z "${{ steps.ns.outputs.ns }}" ]; then
+            echo "Namespace is empty. Set DOCKERHUB_USERNAME secret or ensure repo owner is available."
+            exit 1
+          fi
 
       - name: Read chart version
         id: chartver
@@ -80,14 +99,19 @@ jobs:
 
       - name: Login to Docker Hub (OCI)
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login registry-1.docker.io \
-            --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
+            --username "${{ steps.ns.outputs.ns }}" --password-stdin
 
+      # ВАЖНО: адрес с namespace — helm сам создаст <ns>/zabbix-mini-chart
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          # ВАЖНО: указываем namespace (твой логин) — helm сам создаст repo <ns>/zabbix-mini-chart
-          helm push "$HELM_TGZ" oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
+          DEST="oci://$REGISTRY/${{ steps.ns.outputs.ns }}"
+          if [ "$DEST" = "oci://$REGISTRY/" ]; then
+            echo "Destination has no namespace"; exit 1
+          fi
+          echo "Pushing chart to $DEST"
+          helm push "$HELM_TGZ" "$DEST"
 
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
@@ -98,8 +122,13 @@ jobs:
 
       - name: Push tar.gz as OCI artifact
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login registry-1.docker.io \
-            -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          oras push registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
+            -u "${{ steps.ns.outputs.ns }}" --password-stdin
+          DEST_REPO="$REGISTRY/${{ steps.ns.outputs.ns }}/zabbix-k8s-bundle"
+          if [ "$DEST_REPO" = "$REGISTRY//zabbix-k8s-bundle" ]; then
+            echo "Artifact repo path has no namespace"; exit 1
+          fi
+          echo "Pushing artifact to $DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}"
+          oras push "$DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}" \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
             --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
