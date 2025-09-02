@@ -57,6 +57,7 @@ jobs:
 
   publish:
     name: Publish to Docker Hub (OCI)
+    if: github.event_name != 'pull_request'
     needs: [test-deploy]
     runs-on: ubuntu-latest
     env:
@@ -66,25 +67,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1) Вычисляем namespace: секрет → иначе владелец репо; to lower-case
+      # Проверяем, что секреты заданы
+      - name: Validate secrets
+        run: |
+          test -n "${{ secrets.DOCKERHUB_TOKEN }}"    || (echo "Missing DOCKERHUB_TOKEN"; exit 1)
+          test -n "${{ secrets.DOCKERHUB_USERNAME }}" || (echo "Missing DOCKERHUB_USERNAME"; exit 1)
+
+      # Нормализуем namespace (lower-case)
       - name: Resolve namespace
         id: ns
         run: |
-          NS="${{ secrets.DOCKERHUB_USERNAME }}"
-          if [ -z "$NS" ]; then
-            NS="${{ github.repository_owner }}"
-            echo "Warn: DOCKERHUB_USERNAME not set; using repo owner"
-          fi
-          NS=$(echo "$NS" | tr '[:upper:]' '[:lower:]')
+          NS="$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')"
           echo "ns=${NS}" >> "$GITHUB_OUTPUT"
-
-      # 2) Защитная проверка: не пускать push без namespace
-      - name: Validate namespace
-        run: |
-          if [ -z "${{ steps.ns.outputs.ns }}" ]; then
-            echo "Namespace is empty. Set DOCKERHUB_USERNAME secret or ensure repo owner is available."
-            exit 1
-          fi
 
       - name: Read chart version
         id: chartver
@@ -102,14 +96,10 @@ jobs:
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
             --username "${{ steps.ns.outputs.ns }}" --password-stdin
 
-      # ВАЖНО: адрес с namespace — helm сам создаст <ns>/zabbix-mini-chart
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
           DEST="oci://$REGISTRY/${{ steps.ns.outputs.ns }}"
-          if [ "$DEST" = "oci://$REGISTRY/" ]; then
-            echo "Destination has no namespace"; exit 1
-          fi
           echo "Pushing chart to $DEST"
           helm push "$HELM_TGZ" "$DEST"
 
@@ -125,9 +115,6 @@ jobs:
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
             -u "${{ steps.ns.outputs.ns }}" --password-stdin
           DEST_REPO="$REGISTRY/${{ steps.ns.outputs.ns }}/zabbix-k8s-bundle"
-          if [ "$DEST_REPO" = "$REGISTRY//zabbix-k8s-bundle" ]; then
-            echo "Artifact repo path has no namespace"; exit 1
-          fi
           echo "Pushing artifact to $DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}"
           oras push "$DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}" \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
