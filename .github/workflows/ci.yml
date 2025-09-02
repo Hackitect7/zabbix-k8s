@@ -86,9 +86,16 @@ jobs:
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
             --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      - name: Push Helm chart to Docker Hub (OCI) — minimal
+      - name: Login & Push Helm chart to Docker Hub (OCI)
         shell: bash
-        run: helm push zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz oci://registry-1.docker.io/hackitect7
+        run: |
+          set -euo pipefail
+          # 1) Логин в том же шаге
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login registry-1.docker.io \
+            --username hackitect7 --password-stdin
+          # 2) Пуш (одной строкой)
+          helm push zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz \
+            oci://registry-1.docker.io/hackitect7
           
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
