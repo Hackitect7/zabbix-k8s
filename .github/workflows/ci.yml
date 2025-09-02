@@ -2,7 +2,7 @@ name: zabbix-k8s-ci
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -20,11 +20,12 @@ jobs:
         with:
           cluster_name: zbx
 
-      - name: Show tool versions
+      - name: Install kubectl & helm (preinstalled on runner, but ensure versions)
         run: |
           kubectl version --client
           helm version
 
+      # ---------- Deploy ----------
       - name: Apply manifests
         run: |
           kubectl apply -f manifests/00-namespace.yaml
@@ -40,16 +41,18 @@ jobs:
           kubectl -n zabbix wait --for=condition=available deploy/zabbix-web --timeout=600s
           kubectl -n zabbix get pods -o wide
 
+      # ---------- Smoke test (HTTP 200 and "Zabbix" in HTML) ----------
       - name: HTTP check from inside cluster
         run: |
           kubectl -n zabbix run curl --image=curlimages/curl:8.9.1 --restart=Never --rm -i -- \
             sh -c 'curl -s -o - http://zabbix-web.zabbix.svc.cluster.local/ | tee /dev/stderr | grep -qi "Zabbix"'
 
+      # ---------- Package artifacts ----------
       - name: Create tar.gz bundle
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
-      - name: Upload artifact
+      - name: Upload test artifacts (optional)
         uses: actions/upload-artifact@v4
         with:
           name: zabbix-k8s-bundle
@@ -57,28 +60,15 @@ jobs:
 
   publish:
     name: Publish to Docker Hub (OCI)
-    if: github.event_name != 'pull_request'
     needs: [test-deploy]
     runs-on: ubuntu-latest
     env:
       REGISTRY: registry-1.docker.io
+      REPO_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Проверяем, что секреты заданы
-      - name: Validate secrets
-        run: |
-          test -n "${{ secrets.DOCKERHUB_TOKEN }}"    || (echo "Missing DOCKERHUB_TOKEN"; exit 1)
-          test -n "${{ secrets.DOCKERHUB_USERNAME }}" || (echo "Missing DOCKERHUB_USERNAME"; exit 1)
-
-      # Нормализуем namespace (lower-case)
-      - name: Resolve namespace
-        id: ns
-        run: |
-          NS="$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')"
-          echo "ns=${NS}" >> "$GITHUB_OUTPUT"
 
       - name: Read chart version
         id: chartver
@@ -94,14 +84,12 @@ jobs:
       - name: Login to Docker Hub (OCI)
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
-            --username "${{ steps.ns.outputs.ns }}" --password-stdin
+            --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          DEST="oci://$REGISTRY/${{ steps.ns.outputs.ns }}"
-          echo "Pushing chart to $DEST"
-          helm push "$HELM_TGZ" "$DEST"
+          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
 
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
@@ -110,12 +98,10 @@ jobs:
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
-      - name: Push tar.gz as OCI artifact
+      - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
-            -u "${{ steps.ns.outputs.ns }}" --password-stdin
-          DEST_REPO="$REGISTRY/${{ steps.ns.outputs.ns }}/zabbix-k8s-bundle"
-          echo "Pushing artifact to $DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}"
-          oras push "$DEST_REPO:manifests-${{ steps.chartver.outputs.ver }}" \
+            -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
             ./zabbix-k8s-bundle.tar.gz:application/gzip \
             --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
