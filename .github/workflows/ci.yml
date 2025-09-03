@@ -98,6 +98,9 @@ jobs:
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
+      - name: Debug target
+        run: echo "Pushing to $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }}"
+
       - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
