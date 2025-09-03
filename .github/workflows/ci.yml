@@ -86,31 +86,11 @@ jobs:
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
             --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      - name: Mirror auth key for registry-1.docker.io
-        shell: bash
-        run: |
-          set -euo pipefail
-          DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
-          CFG="$DOCKER_CONFIG/config.json"
-          # Зеркалим креды с "https://index.docker.io/v1/" на "registry-1.docker.io"
-          tmp="$CFG.tmp"
-          jq '
-            .auths["registry-1.docker.io"] = (
-              .auths["registry-1.docker.io"]
-              // .auths["https://index.docker.io/v1/"]
-              // .auths["https://registry-1.docker.io/v2/"]
-              // .auths["docker.io"]
-            )
-          ' "$CFG" > "$tmp" && mv "$tmp" "$CFG"
-          jq -r '.auths | keys[]' "$CFG"
-
       - name: Push Helm chart to Docker Hub (OCI)
-        shell: bash
         run: |
-          set -euo pipefail
-          helm --debug push "zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz" \
-            oci://registry-1.docker.io/hackitect7
-          
+          HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
+          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
+
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
 
