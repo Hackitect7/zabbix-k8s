@@ -1,0 +1,5 @@
+FROM alpine:3.20
+WORKDIR /bundle
+COPY zabbix-k8s-bundle.tar.gz /bundle/
+# Просто показать содержимое при запуске контейнера
+CMD ["/bin/sh", "-lc", "ls -l /bundle && tar -tzf /bundle/zabbix-k8s-bundle.tar.gz | head -n 100"]

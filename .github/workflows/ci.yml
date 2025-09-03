@@ -20,7 +20,7 @@ jobs:
         with:
           cluster_name: zbx
 
-      - name: Install kubectl & helm (preinstalled on runner, but ensure versions)
+      - name: Show tool versions
         run: |
           kubectl version --client
           helm version
@@ -59,11 +59,13 @@ jobs:
           path: zabbix-k8s-bundle.tar.gz
 
   publish:
-    name: Publish to Docker Hub (OCI)
+    name: Publish to Docker Hub (OCI chart + image with bundle)
+    if: github.event_name != 'pull_request'
     needs: [test-deploy]
     runs-on: ubuntu-latest
     env:
-      REGISTRY: registry-1.docker.io
+      REGISTRY_OCI: registry-1.docker.io             # для Helm OCI пуша
+      REGISTRY_DOCKER: docker.io                      # для docker image пуша
       REPO_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
 
     steps:
@@ -81,31 +83,32 @@ jobs:
           helm package helm/zabbix-mini-chart
           ls -l *.tgz
 
-      - name: Login to Docker Hub (OCI)
+      - name: Login to Docker Hub (OCI for Helm)
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY \
-            --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login $REGISTRY_OCI \
+            --username "${{ env.REPO_NAMESPACE }}" --password-stdin
 
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           HELM_TGZ="zabbix-mini-chart-${{ steps.chartver.outputs.ver }}.tgz"
-          helm push "$HELM_TGZ" oci://$REGISTRY/${{ env.REPO_NAMESPACE }}
+          helm push "$HELM_TGZ" oci://$REGISTRY_OCI/${{ env.REPO_NAMESPACE }}
 
-      - name: Install ORAS
-        uses: oras-project/setup-oras@v1
-
-      - name: Create tar.gz bundle
+      # ---------- Image with tar.gz bundle ----------
+      - name: Create tar.gz bundle (again for image context)
         run: |
           tar -czf zabbix-k8s-bundle.tar.gz manifests helm
 
-      - name: Debug target
-        run: echo "Pushing to $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }}"
+      - name: Login to Docker Hub (classic)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_DOCKER }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push tar.gz as OCI artifact to Docker Hub via ORAS
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
-            -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
-            --config /dev/null:application/vnd.oci.image.config.v1+json \
-            --artifact-type application/gzip \
-            ./zabbix-k8s-bundle.tar.gz:application/gzip
+      - name: Build & push image carrying tar.gz
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.bundle
+          push: true
+          tags: ${{ env.REGISTRY_DOCKER }}/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }}
