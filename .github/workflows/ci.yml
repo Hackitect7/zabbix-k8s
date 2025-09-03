@@ -103,5 +103,6 @@ jobs:
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | oras login $REGISTRY \
             -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           oras push $REGISTRY/${{ env.REPO_NAMESPACE }}/zabbix-k8s-bundle:manifests-${{ steps.chartver.outputs.ver }} \
-            ./zabbix-k8s-bundle.tar.gz:application/gzip \
-            --config <(echo '{}'):/dev/null:application/vnd.oci.image.config.v1+json
+            --config /dev/null:application/vnd.oci.image.config.v1+json \
+            --artifact-type application/gzip \
+            ./zabbix-k8s-bundle.tar.gz:application/gzip
