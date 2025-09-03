@@ -1,5 +1,7 @@
 # Zabbix в Kubernetes (alpine) — manifests + мини Helm-чарт + CI/CD в Docker Hub
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Namespace (Docker Hub):** `hackitect7`
 
 Проект разворачивает три компонента Zabbix в Kubernetes из контейнеров на базе **alpine-latest** и предоставляет два способа установки: plain YAML (manifests) и минимальный Helm-чарт. Репозиторий снабжён GitHub Actions, который:
@@ -204,3 +206,16 @@ kubectl -n zabbix run curl --image=curlimages/curl:8.9.1 --restart=Never --rm -i
 * Бэкапы БД (CronJob + `pg_dump` в объектное хранилище).
 * HA Zabbix Server + TimescaleDB для истории, PDB/PodAntiAffinity, HPA для `zabbix-web`.
 * CI: chart-testing, релизы по тэгам, подпись OCI (cosign).
+
+---
+
+## Лицензия
+
+Этот репозиторий распространяется по лицензии MIT. Полный текст см. в файле LICENSE.
+
+Рекомендации:
+
+- В исходных файлах можно добавлять заголовок SPDX-License-Identifier: MIT.
+- В README установлен бейдж лицензии (см. вверху).
+
+© 2025 Алексей (Hackitect7). Все права, не ограниченные условиями MIT, сохранены.
